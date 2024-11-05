@@ -8,10 +8,10 @@ const port = 3042;
 app.use(cors());
 
 const db = mysql.createConnection({
-    host: 'localhost',
-    user: 'root',
-    password: '',
-    database: 'vehiclesdata'
+    host: process.env.DB_HOST || 'localhost',
+    user: process.env.DB_USER || 'root',
+    password: process.env.DB_PASS || '',
+    database: process.env.DB_NAME || ''
 });
 
 db.connect(err => {
