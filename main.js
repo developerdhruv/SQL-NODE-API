@@ -4,16 +4,16 @@ const mysql = require('mysql2');
 const cors = require('cors');  
 const app = express();
 const port = 3042;
-
+const dotenv = require('dotenv');
 app.use(cors());
-
+dotenv.config();
+console.log(process.env.DB_HOST);
 const db = mysql.createConnection({
-    host: process.env.DB_HOST || 'localhost',
-    user: process.env.DB_USER || 'root',
-    password: process.env.DB_PASS || '',
-    database: process.env.DB_NAME || ''
-});
-
+    host: process.env.DB_HOST, // MySQL hostname
+    user: process.env.DB_USER, // MySQL username
+    password: process.env.DB_PASS, // MySQL password
+    database: process.env.DB_NAME // MySQL database name
+  });
 db.connect(err => {
     if (err) {
         console.error('Database connection failed:', err);
