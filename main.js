@@ -26,32 +26,75 @@ db.connect(err => {
 
 // New endpoint to fetch distinct makes
 app.get('/api/makes', (req, res) => {
-    const query = 'SELECT DISTINCT Meta_cpr_make AS make FROM dataweb WHERE Meta_cpr_make IS NOT NULL';
+    const { term } = req.query;
 
-    db.query(query, (err, results) => {
+    if (!term) {
+        return res.status(400).send('Search term is required');
+    }
+
+    // SQL query to fetch makes that match the search term, ranked by relevance
+    const query = `
+        SELECT DISTINCT Meta_cpr_make AS make
+        FROM dataweb
+        WHERE Meta_cpr_make LIKE ?
+          AND Meta_cpr_make IS NOT NULL
+        ORDER BY 
+            LOCATE(?, Meta_cpr_make) ASC,  -- Rank by position of the search term in the make
+            LENGTH(Meta_cpr_make) ASC      -- Then by length of the make for tie-breaking
+    `;
+
+    // Perform the query with partial matching on the make column
+    db.query(query, [`%${term}%`, term], (err, results) => {
         if (err) {
             console.error('Error fetching makes:', err);
-            res.status(500).send('Error fetching makes');
-        } else {
-            const makes = results.map(row => row.make);
-            res.json(makes);
+            return res.status(500).send('Error fetching makes');
         }
+
+        // Extract the makes from the results
+        const makes = results.map(row => row.make);
+
+        // Send the response as a JSON array of makes
+        res.json(makes);
     });
 });
-
 // New endpoint to fetch models based on selected make
 app.get('/api/models', (req, res) => {
     const { make } = req.query;
-    const query = 'SELECT DISTINCT Meta_cpr_model AS model FROM dataweb WHERE Meta_cpr_make = ? AND Meta_cpr_model IS NOT NULL';
 
-    db.query(query, [make], (err, results) => {
+    if (!make) {
+        return res.status(400).send('Make parameter is required');
+    }
+
+    // SQL query to fetch models based on the make and rank them by similarity
+    const query = `
+        SELECT DISTINCT Meta_cpr_model AS model
+        FROM dataweb
+        WHERE Meta_cpr_make LIKE ?  -- Match makes that contain the search term
+          AND Meta_cpr_model IS NOT NULL
+        ORDER BY 
+            LOCATE(?, Meta_cpr_model) ASC,  -- Rank models based on how closely the term matches the model name
+            LENGTH(Meta_cpr_model) ASC      -- Optional: sort by model name length to prioritize shorter names
+    `;
+
+    // Perform the query with partial matching on the make field and model names
+    db.query(query, [`%${make}%`, make], (err, results) => {
         if (err) {
             console.error('Error fetching models:', err);
-            res.status(500).send('Error fetching models');
-        } else {
-            const models = results.map(row => row.model);
-            res.json(models);
+            return res.status(500).send('Error fetching models');
         }
+
+        // Split the model names if they are combined (e.g., "Pontiac,Chevrolet")
+        let models = [];
+        results.forEach(row => {
+            const modelList = row.model.split(',');  // Split on commas if there are multiple makes in a model name
+            models = models.concat(modelList);  // Flatten the results into a single array
+        });
+
+        // Remove duplicates and clean up empty strings
+        models = [...new Set(models)].filter(model => model.trim() !== "");
+
+        // Return the results as a JSON response
+        res.json(models);
     });
 });
 
