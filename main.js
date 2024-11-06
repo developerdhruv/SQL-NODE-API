@@ -65,35 +65,33 @@ app.get('/api/models', (req, res) => {
         return res.status(400).send('Make parameter is required');
     }
 
-    // SQL query to fetch models based on the make and rank them by similarity
+    // Updated query to fetch models for specific make
     const query = `
         SELECT DISTINCT Meta_cpr_model AS model
         FROM dataweb
-        WHERE Meta_cpr_make LIKE ?  -- Match makes that contain the search term
+        WHERE Meta_cpr_make = ?
           AND Meta_cpr_model IS NOT NULL
-        ORDER BY 
-            LOCATE(?, Meta_cpr_model) ASC,  -- Rank models based on how closely the term matches the model name
-            LENGTH(Meta_cpr_model) ASC      -- Optional: sort by model name length to prioritize shorter names
+        ORDER BY Meta_cpr_model ASC
     `;
 
-    // Perform the query with partial matching on the make field and model names
-    db.query(query, [`%${make}%`, make], (err, results) => {
+    db.query(query, [make], (err, results) => {
         if (err) {
             console.error('Error fetching models:', err);
             return res.status(500).send('Error fetching models');
         }
 
-        // Split the model names if they are combined (e.g., "Pontiac,Chevrolet")
+        // Split and clean up model names
         let models = [];
         results.forEach(row => {
-            const modelList = row.model.split(',');  // Split on commas if there are multiple makes in a model name
-            models = models.concat(modelList);  // Flatten the results into a single array
+            const modelList = row.model.split(',');
+            models = models.concat(modelList);
         });
 
-        // Remove duplicates and clean up empty strings
-        models = [...new Set(models)].filter(model => model.trim() !== "");
+        // Remove duplicates and empty strings
+        models = [...new Set(models)]
+            .filter(model => model.trim() !== "")
+            .sort();
 
-        // Return the results as a JSON response
         res.json(models);
     });
 });
