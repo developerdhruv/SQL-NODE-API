@@ -7,11 +7,11 @@ const dotenv = require('dotenv');
 app.use(cors());
 dotenv.config();
 
-let db;
+let pool;
 
 async function initializeDB() {
     try {
-        db = await mysql.createConnection({
+        pool = await mysql.createPool({
             host: process.env.DB_HOST,
             user: process.env.DB_USER,
             password: process.env.DB_PASS,
@@ -20,7 +20,7 @@ async function initializeDB() {
             waitForConnections: true,
             queueLimit: 0,
         });
-        console.log('Database connected');
+        console.log('Database pool connected');
     } catch (err) {
         console.error('Database connection failed:', err);
         throw err;
@@ -32,9 +32,21 @@ initializeDB().catch((err) => {
     process.exit(1);
 });
 
-// Existing endpoints...
+// Existing and new endpoints...
 
-// New endpoint to fetch distinct makes
+// Fetch categories
+app.get('/api/categories', async (req, res) => {
+    try {
+        const [results] = await pool.query('SELECT DISTINCT Categories FROM dataweb');
+        const categories = results.map(row => row.Categories);
+        res.json(categories);
+    } catch (err) {
+        console.error('Error fetching categories:', err);
+        res.status(500).send('Error fetching categories');
+    }
+});
+
+// Fetch makes
 app.get('/api/makes', async (req, res) => {
     const { term } = req.query;
 
@@ -62,7 +74,7 @@ app.get('/api/makes', async (req, res) => {
             `;
         }
 
-        const [results] = await db.query(query, queryParams);
+        const [results] = await pool.query(query, queryParams);
         const makes = results.map(row => row.make);
         res.json(makes);
     } catch (err) {
@@ -71,7 +83,7 @@ app.get('/api/makes', async (req, res) => {
     }
 });
 
-// New endpoint to fetch models based on selected make
+// Fetch models
 app.get('/api/models', async (req, res) => {
     const { make, term } = req.query;
 
@@ -103,7 +115,7 @@ app.get('/api/models', async (req, res) => {
             `;
         }
 
-        const [results] = await db.query(query, queryParams);
+        const [results] = await pool.query(query, queryParams);
         let models = [];
         results.forEach(row => {
             const modelList = row.model.split(',');
@@ -119,7 +131,7 @@ app.get('/api/models', async (req, res) => {
     }
 });
 
-// Existing product fetching endpoint...
+// Fetch products
 app.get('/api/products', async (req, res) => {
     const { make, model, year, keyword, category } = req.query;
     let query = 'SELECT * FROM dataweb WHERE 1=1';
@@ -147,7 +159,7 @@ app.get('/api/products', async (req, res) => {
     }
 
     try {
-        const [results] = await db.query(query, queryParams);
+        const [results] = await pool.query(query, queryParams);
         res.json(results);
     } catch (err) {
         console.error('Error fetching products:', err);
@@ -155,11 +167,11 @@ app.get('/api/products', async (req, res) => {
     }
 });
 
-// Endpoint to fetch a single product by ID (already present)
+// Fetch a single product
 app.get('/api/products/:id', async (req, res) => {
     const { id } = req.params;
     try {
-        const [[result]] = await db.query('SELECT * FROM dataweb WHERE ID = ?', [id]);
+        const [[result]] = await pool.query('SELECT * FROM dataweb WHERE ID = ?', [id]);
         res.json(result);
     } catch (err) {
         console.error('Error fetching product:', err);
@@ -167,7 +179,7 @@ app.get('/api/products/:id', async (req, res) => {
     }
 });
 
-// Existing endpoint for keyword suggestions...
+// Fetch keyword suggestions
 app.get('/api/suggestions', async (req, res) => {
     const { term } = req.query;
     if (!term) {
@@ -182,23 +194,11 @@ app.get('/api/suggestions', async (req, res) => {
             LIMIT 10
         `;
         const searchTerm = `%${term}%`;
-        const [results] = await db.query(query, [searchTerm, searchTerm, searchTerm]);
+        const [results] = await pool.query(query, [searchTerm, searchTerm, searchTerm]);
         res.json(results.map(row => row.Name));
     } catch (err) {
         console.error('Error fetching suggestions:', err);
         res.status(500).send('Error fetching suggestions');
-    }
-});
-
-// New endpoint to fetch categories (already present)
-app.get('/api/categories', async (req, res) => {
-    try {
-        const [results] = await db.query('SELECT DISTINCT Categories FROM dataweb');
-        const categories = results.map(row => row.Categories);
-        res.json(categories);
-    } catch (err) {
-        console.error('Error fetching categories:', err);
-        res.status(500).send('Error fetching categories');
     }
 });
 
