@@ -32,8 +32,6 @@ initializeDB().catch((err) => {
     process.exit(1);
 });
 
-// Existing and new endpoints...
-
 // Fetch categories
 app.get('/api/categories', async (req, res) => {
     try {
@@ -61,8 +59,8 @@ app.get('/api/makes', async (req, res) => {
                 WHERE Meta_cpr_make LIKE ?
                   AND Meta_cpr_make IS NOT NULL
                 ORDER BY 
-                    LOCATE(?, Meta_cpr_make) ASC,  -- Rank by position of the search term in the make
-                    LENGTH(Meta_cpr_make) ASC      -- Then by length of the make for tie-breaking
+                    LOCATE(?, Meta_cpr_make) ASC,
+                    LENGTH(Meta_cpr_make) ASC
             `;
             queryParams.push(`%${term}%`, term);
         } else {
@@ -131,12 +129,57 @@ app.get('/api/models', async (req, res) => {
     }
 });
 
-// Fetch products
+app.get('/api/years-range', async (req, res) => {
+    const { make } = req.query;
+    
+    if (!make) {
+        return res.status(400).send('Make parameter is required');
+    }
+
+    try {
+        const query = `
+            SELECT 
+                MIN(Meta_year_start) as minYear,
+                MAX(Meta_year_end) as maxYear
+            FROM dataweb
+            WHERE Meta_cpr_make = ?
+              AND Meta_year_start IS NOT NULL
+              AND Meta_year_end IS NOT NULL
+        `;
+        
+        const [results] = await pool.query(query, [make]);
+        res.json(results[0]);
+    } catch (err) {
+        console.error('Error fetching year range:', err);
+        res.status(500).send('Error fetching year range');
+    }
+});
+
+// Updated products endpoint with partial SKU search
 app.get('/api/products', async (req, res) => {
-    const { make, model, year, keyword, category } = req.query;
+    const { make, model, year, keyword, category, sku } = req.query;
     let query = 'SELECT * FROM dataweb WHERE 1=1';
     const queryParams = [];
 
+    // Handle SKU/Part Number search first
+    if (sku) {
+        const skuWithoutPrefix = sku.replace(/^[A-Za-z]+/, ''); // Remove leading letters if any
+        query += ` AND (
+            SKU LIKE ? OR 
+            SKU LIKE ? OR 
+            SKU LIKE ? OR 
+            SKU LIKE ?
+        )`;
+        // Add different variations of the SKU search
+        queryParams.push(
+            `%${sku}%`,                // Full SKU
+            `%${skuWithoutPrefix}%`,   // SKU without prefix
+            `${sku}%`,                 // Starting with SKU
+            `${skuWithoutPrefix}%`     // Starting with SKU without prefix
+        );
+    }
+
+    // Add other search conditions
     if (make) {
         query += ' AND Meta_cpr_make = ?';
         queryParams.push(make);
@@ -159,6 +202,18 @@ app.get('/api/products', async (req, res) => {
     }
 
     try {
+        // Add ORDER BY clause to prioritize exact matches
+        if (sku) {
+            query += ` ORDER BY 
+                CASE 
+                    WHEN SKU = ? THEN 1
+                    WHEN SKU LIKE ? THEN 2
+                    ELSE 3 
+                END,
+                LENGTH(SKU)`;
+            queryParams.push(sku, `${sku}%`);
+        }
+
         const [results] = await pool.query(query, queryParams);
         res.json(results);
     } catch (err) {
@@ -179,23 +234,58 @@ app.get('/api/products/:id', async (req, res) => {
     }
 });
 
-// Fetch keyword suggestions
+// Enhanced suggestions endpoint with SKU support
 app.get('/api/suggestions', async (req, res) => {
     const { term } = req.query;
     if (!term) {
-        return res.json([]); // Return empty array if no term is provided
+        return res.json([]);
     }
 
     try {
+        const skuWithoutPrefix = term.replace(/^[A-Za-z]+/, '');
         const query = `
-            SELECT DISTINCT Name 
+            SELECT DISTINCT 
+                CASE 
+                    WHEN SKU LIKE ? THEN SKU
+                    WHEN Name LIKE ? THEN Name
+                    ELSE NULL 
+                END as suggestion
             FROM dataweb 
-            WHERE Name LIKE ? OR Meta_cpr_make LIKE ? OR Meta_cpr_model LIKE ?
+            WHERE 
+                SKU LIKE ? OR 
+                SKU LIKE ? OR 
+                Name LIKE ? OR 
+                Meta_cpr_make LIKE ? OR 
+                Meta_cpr_model LIKE ?
+            ORDER BY 
+                CASE 
+                    WHEN SKU = ? THEN 1
+                    WHEN SKU LIKE ? THEN 2
+                    ELSE 3 
+                END,
+                LENGTH(suggestion)
             LIMIT 10
         `;
+        
         const searchTerm = `%${term}%`;
-        const [results] = await pool.query(query, [searchTerm, searchTerm, searchTerm]);
-        res.json(results.map(row => row.Name));
+        const skuSearchTerm = `%${skuWithoutPrefix}%`;
+        
+        const [results] = await pool.query(query, [
+            searchTerm,
+            searchTerm,
+            searchTerm,
+            skuSearchTerm,
+            searchTerm,
+            searchTerm,
+            searchTerm,
+            term,
+            `${term}%`
+        ]);
+        
+        res.json(results
+            .map(row => row.suggestion)
+            .filter(suggestion => suggestion !== null)
+        );
     } catch (err) {
         console.error('Error fetching suggestions:', err);
         res.status(500).send('Error fetching suggestions');
