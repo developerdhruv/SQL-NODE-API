@@ -83,7 +83,7 @@ app.get('/api/makes', async (req, res) => {
 
 // Fetch models
 app.get('/api/models', async (req, res) => {
-    const { make, term } = req.query;
+    const { make, year, term } = req.query;
 
     if (!make) {
         return res.status(400).send('Make parameter is required');
@@ -93,24 +93,41 @@ app.get('/api/models', async (req, res) => {
         let query;
         const queryParams = [make];
 
-        if (term) {
+        if (year) {
+            // Add year condition to the query
             query = `
                 SELECT DISTINCT Meta_cpr_model AS model
                 FROM dataweb
                 WHERE Meta_cpr_make = ?
-                  AND Meta_cpr_model LIKE ?
+                  AND Meta_year_start <= ?
+                  AND Meta_year_end >= ?
                   AND Meta_cpr_model IS NOT NULL
-                ORDER BY LOCATE(?, Meta_cpr_model) ASC, LENGTH(Meta_cpr_model) ASC
             `;
-            queryParams.push(`%${term}%`, term);
+            queryParams.push(year, year);
+
+            if (term) {
+                query += ` AND Meta_cpr_model LIKE ?
+                ORDER BY LOCATE(?, Meta_cpr_model) ASC, LENGTH(Meta_cpr_model) ASC`;
+                queryParams.push(`%${term}%`, term);
+            } else {
+                query += ` ORDER BY Meta_cpr_model ASC`;
+            }
         } else {
+            // Original query without year filter
             query = `
                 SELECT DISTINCT Meta_cpr_model AS model
                 FROM dataweb
                 WHERE Meta_cpr_make = ?
                   AND Meta_cpr_model IS NOT NULL
-                ORDER BY Meta_cpr_model ASC
             `;
+
+            if (term) {
+                query += ` AND Meta_cpr_model LIKE ?
+                ORDER BY LOCATE(?, Meta_cpr_model) ASC, LENGTH(Meta_cpr_model) ASC`;
+                queryParams.push(`%${term}%`, term);
+            } else {
+                query += ` ORDER BY Meta_cpr_model ASC`;
+            }
         }
 
         const [results] = await pool.query(query, queryParams);
